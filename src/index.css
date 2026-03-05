@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f7faf8;
+  color: #2d3d34;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f0f5f2; }
+::-webkit-scrollbar-thumb { background: #c5d6cc; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a8bdb0; }
+
+pre code.hljs {
+  background: #f3f6f4 !important;
+  border-radius: 8px;
+  padding: 16px !important;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+code {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+}
+
+mark {
+  background: #7ec8a030;
+  color: #3a8a62;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+
+.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+  margin-top: 1em; margin-bottom: 0.5em; font-weight: 600; color: #2d3d34;
+}
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.25em; }
+.markdown-content h3 { font-size: 1.1em; }
+.markdown-content p { margin: 0.5em 0; line-height: 1.7; }
+.markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+.markdown-content li { margin: 0.25em 0; }
+.markdown-content blockquote {
+  border-left: 3px solid #7ec8a0; padding-left: 12px; margin: 0.5em 0; color: #6b8578;
+}
+.markdown-content table { border-collapse: collapse; margin: 0.5em 0; width: 100%; }
+.markdown-content th, .markdown-content td { border: 1px solid #d0ddd5; padding: 6px 12px; text-align: left; }
+.markdown-content th { background: #e8f0eb; }
+.markdown-content a { color: #4da87a; text-decoration: none; }
+.markdown-content a:hover { text-decoration: underline; }
+.markdown-content img { max-width: 100%; border-radius: 8px; }
+.markdown-content :not(pre) > code {
+  background: #e8f0eb; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: #3a6b50;
+}
+.markdown-content strong, .markdown-content b { font-weight: 600; }
+.markdown-content em, .markdown-content i { font-style: italic; }
+.markdown-content del, .markdown-content s { text-decoration: line-through; }
+.markdown-content hr { border: none; border-top: 1px solid #d0ddd5; margin: 1em 0; }
