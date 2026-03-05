@@ -16,6 +16,7 @@ export interface SessionRecord {
   tool_call_count: number;
   is_favorite: number;
   indexed_at: string | null;
+  custom_title: string | null;
 }
 
 export interface TagRecord {

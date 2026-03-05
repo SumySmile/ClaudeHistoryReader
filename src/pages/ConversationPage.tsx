@@ -3,10 +3,10 @@ import { useSessionDetail } from '../hooks/useConversations';
 import { useTags } from '../hooks/useTags';
 import { MessageList } from '../components/detail/MessageList';
 import { TagManager } from '../components/tags/TagManager';
-import { ArrowLeft, Download, Star, Clock, MessageSquare, Wrench } from 'lucide-react';
+import { ArrowLeft, Download, Star, Clock, MessageSquare, Wrench, Pencil, Check, X } from 'lucide-react';
 import { MessageListSkeleton } from '../components/shared/Skeleton';
-import { formatDate, formatTokens } from '../lib/utils';
-import { toggleFavorite, exportSession } from '../lib/api';
+import { formatDate, formatTokens, sessionTitle } from '../lib/utils';
+import { toggleFavorite, exportSession, updateSessionTitle, getLocalCustomTitle } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 
 export function ConversationPage() {
@@ -15,6 +15,10 @@ export function ConversationPage() {
   const { data, loading, error } = useSessionDetail(id);
   const { tags, create: createTag, addToSession, removeFromSession, reload: reloadTags } = useTags();
   const [isFav, setIsFav] = useState<boolean | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+  const [titleSaving, setTitleSaving] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
 
   const handleToggleFav = useCallback(async () => {
     if (!id) return;
@@ -81,6 +85,37 @@ export function ConversationPage() {
 
   const { session, messages, subagents } = data;
   const favorite = isFav !== null ? isFav : !!session.is_favorite;
+  const localCustomTitle = getLocalCustomTitle(session.id);
+  const effectiveSummary = localCustomTitle || session.custom_title || session.summary;
+  const displayTitle = sessionTitle(effectiveSummary, session.first_prompt, 'Untitled Conversation');
+
+  const beginEditTitle = () => {
+    setTitleError(null);
+    setTitleInput(displayTitle === 'Untitled Conversation' ? '' : displayTitle);
+    setEditingTitle(true);
+  };
+
+  const cancelEditTitle = () => {
+    setEditingTitle(false);
+    setTitleInput('');
+    setTitleError(null);
+  };
+
+  const saveTitle = async () => {
+    if (!id) return;
+    setTitleSaving(true);
+    setTitleError(null);
+    try {
+      const result = await updateSessionTitle(id, titleInput);
+      session.summary = result.title;
+      session.custom_title = result.title;
+      setEditingTitle(false);
+    } catch (e: any) {
+      setTitleError(e.message || 'Failed to update title');
+    } finally {
+      setTitleSaving(false);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -90,9 +125,53 @@ export function ConversationPage() {
             <ArrowLeft size={20} />
           </Link>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-medium text-[#2d3d34] truncate">
-              {session.summary || 'Untitled Conversation'}
-            </h1>
+            {editingTitle ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  maxLength={120}
+                  placeholder="Enter custom title"
+                  className="flex-1 min-w-0 bg-[#f0f5f2] border border-[#d0ddd5] rounded px-2 py-1 text-sm text-[#2d3d34] focus:outline-none focus:border-[#7ec8a0]"
+                />
+                <button
+                  onClick={saveTitle}
+                  disabled={titleSaving}
+                  className="p-1.5 rounded text-[#4da87a] hover:bg-[#edf7f0] disabled:opacity-50"
+                  title="Save title"
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={cancelEditTitle}
+                  disabled={titleSaving}
+                  className="p-1.5 rounded text-[#9aafa3] hover:bg-[#f0f5f2] disabled:opacity-50"
+                  title="Cancel"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 min-w-0">
+                <h1 className="text-lg font-medium text-[#2d3d34] truncate">
+                  {displayTitle}
+                </h1>
+                {(session.custom_title || localCustomTitle) && (
+                  <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-[#e8f0eb] text-[#6b8578] shrink-0">
+                    <Pencil size={10} />
+                    Custom
+                  </span>
+                )}
+                <button
+                  onClick={beginEditTitle}
+                  className="p-1 rounded text-[#9aafa3] hover:text-[#6b8578] hover:bg-[#f0f5f2]"
+                  title="Edit title"
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
+            {titleError && <div className="text-xs text-red-500 mt-1">{titleError}</div>}
             <div className="flex items-center gap-4 mt-1 text-xs text-[#9aafa3]">
               <span className="flex items-center gap-1">
                 <Clock size={12} /> {formatDate(session.created_at)}

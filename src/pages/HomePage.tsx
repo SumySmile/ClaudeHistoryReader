@@ -20,6 +20,10 @@ interface Filters {
 export function HomePage() {
   const [filters, setFilters] = useState<Filters>({});
   const { data, loading, error, page, setPage, toggleFavorite } = useConversations(filters);
+  const handleSelectProject = (projectSlug: string) => {
+    setPage(1);
+    setFilters(prev => ({ ...prev, project: projectSlug }));
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -44,6 +48,7 @@ export function HomePage() {
             <ConversationList
               sessions={data.sessions}
               onToggleFavorite={toggleFavorite}
+              onSelectProject={handleSelectProject}
             />
             {data.pagination.totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 mt-6 pb-4">

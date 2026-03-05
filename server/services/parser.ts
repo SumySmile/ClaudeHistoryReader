@@ -2,6 +2,7 @@ import fs from 'fs';
 import readline from 'readline';
 import path from 'path';
 import type { ParsedMessage, MessageContent } from '../types.js';
+import { normalizeMessageText } from './text-normalization.js';
 
 export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
   if (!fs.existsSync(filePath)) return [];
@@ -61,7 +62,8 @@ function parseUserMessage(obj: any): ParsedMessage | null {
   const messageContent: MessageContent[] = [];
 
   if (typeof content === 'string') {
-    messageContent.push({ type: 'text', text: content });
+    const normalized = normalizeMessageText(content);
+    if (normalized) messageContent.push({ type: 'text', text: normalized });
   } else if (Array.isArray(content)) {
     for (const block of content) {
       if (block.type === 'tool_result') {
@@ -70,14 +72,17 @@ function parseUserMessage(obj: any): ParsedMessage | null {
           : Array.isArray(block.content)
             ? block.content.map((c: any) => c.text || '').join('\n')
             : JSON.stringify(block.content);
+        const normalized = normalizeMessageText(text);
+        if (!normalized) continue;
         messageContent.push({
           type: 'tool_result',
           tool_use_id: block.tool_use_id,
-          content: text.slice(0, 10000), // Truncate very long results
+          content: normalized.slice(0, 10000), // Truncate very long results
           is_error: block.is_error,
         });
       } else if (block.type === 'text') {
-        messageContent.push({ type: 'text', text: block.text });
+        const normalized = normalizeMessageText(block.text);
+        if (normalized) messageContent.push({ type: 'text', text: normalized });
       } else if (block.type === 'image') {
         messageContent.push({ type: 'image', source: block.source });
       }
@@ -120,7 +125,8 @@ function extractAssistantContent(blocks: any[]): MessageContent[] {
   const result: MessageContent[] = [];
   for (const block of blocks) {
     if (block.type === 'text' && block.text) {
-      result.push({ type: 'text', text: block.text });
+      const normalized = normalizeMessageText(block.text);
+      if (normalized) result.push({ type: 'text', text: normalized });
     } else if (block.type === 'thinking' && block.thinking) {
       result.push({ type: 'thinking', thinking: block.thinking, summary: block.summary });
     } else if (block.type === 'tool_use') {

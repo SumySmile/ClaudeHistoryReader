@@ -1,15 +1,18 @@
 import { Link } from 'react-router-dom';
-import { Star, MessageSquare, Clock, Wrench } from 'lucide-react';
-import { Session } from '../../lib/api';
-import { timeAgo, truncate, cn, formatTokens } from '../../lib/utils';
+import { Star, MessageSquare, Clock, Wrench, Pencil } from 'lucide-react';
+import { Session, getLocalCustomTitle } from '../../lib/api';
+import { timeAgo, truncate, cn, formatTokens, sessionTitle } from '../../lib/utils';
 import { TagBadge } from '../tags/TagBadge';
 
 interface Props {
   session: Session;
   onToggleFavorite: (id: string) => void;
+  onSelectProject?: (projectSlug: string) => void;
 }
 
-export function ConversationCard({ session, onToggleFavorite }: Props) {
+export function ConversationCard({ session, onToggleFavorite, onSelectProject }: Props) {
+  const localCustomTitle = getLocalCustomTitle(session.id);
+  const effectiveSummary = localCustomTitle || session.custom_title || session.summary;
   return (
     <div className="bg-white rounded-lg p-4 hover:bg-[#edf5f0] transition-colors border border-[#d0ddd5] group shadow-sm">
       <div className="flex items-start gap-3">
@@ -24,9 +27,20 @@ export function ConversationCard({ session, onToggleFavorite }: Props) {
         </button>
 
         <Link to={`/conversation/${session.id}`} className="flex-1 min-w-0">
-          <h3 className="font-medium text-[#2d3d34] truncate">
-            {session.summary || truncate(session.first_prompt, 80) || 'Untitled'}
-          </h3>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="font-medium text-[#2d3d34] truncate">
+              {sessionTitle(effectiveSummary, session.first_prompt)}
+            </h3>
+            {(session.custom_title || localCustomTitle) && (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-[#e8f0eb] text-[#6b8578] shrink-0"
+                title="Custom title"
+              >
+                <Pencil size={10} />
+                Custom
+              </span>
+            )}
+          </div>
 
           {session.first_prompt && session.summary && (
             <p className="text-sm text-[#6b8578] mt-1 truncate">
@@ -60,7 +74,22 @@ export function ConversationCard({ session, onToggleFavorite }: Props) {
           </div>
 
           <div className="flex items-center gap-2 mt-2">
-            <span className="text-xs px-2 py-0.5 rounded bg-[#e8f0eb] text-[#6b8578]">
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelectProject?.(session.project_slug);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelectProject?.(session.project_slug);
+                }
+              }}
+              className="text-xs px-2 py-0.5 rounded bg-[#e8f0eb] text-[#6b8578] cursor-pointer hover:bg-[#dbeae2]"
+            >
               {session.project_slug.replace(/--/g, '/').split('/').pop()}
             </span>
             {session.git_branch && session.git_branch !== 'HEAD' && (

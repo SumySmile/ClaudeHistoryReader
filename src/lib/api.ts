@@ -1,4 +1,37 @@
 const BASE = '/api';
+const LOCAL_TITLE_KEY = 'chv_custom_titles_v1';
+
+function readLocalTitles(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LOCAL_TITLE_KEY);
+    return raw ? JSON.parse(raw) as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalTitles(map: Record<string, string>): void {
+  try {
+    localStorage.setItem(LOCAL_TITLE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+export function getLocalCustomTitle(sessionId: string): string | null {
+  const map = readLocalTitles();
+  return map[sessionId] || null;
+}
+
+function setLocalCustomTitle(sessionId: string, title: string): void {
+  const map = readLocalTitles();
+  if (title.trim()) {
+    map[sessionId] = title.trim();
+  } else {
+    delete map[sessionId];
+  }
+  writeLocalTitles(map);
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
@@ -27,6 +60,7 @@ export interface Session {
   total_output_tokens: number;
   tool_call_count: number;
   is_favorite: number;
+  custom_title?: string | null;
   tags: { name: string; color: string }[];
 }
 
@@ -123,6 +157,24 @@ export const getSessionMessages = (id: string) =>
 
 export const toggleFavorite = (id: string) =>
   fetchJson<{ is_favorite: number }>(`/sessions/${id}/favorite`, { method: 'PATCH' });
+
+export const updateSessionTitle = (id: string, title: string) =>
+  fetchJson<{ title: string }>(`/sessions/${id}/title`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  }).catch(async (_err) => {
+    // Compatibility fallback for environments/proxies that reject PATCH.
+    try {
+      return await fetchJson<{ title: string }>(`/sessions/${id}/title`, {
+        method: 'POST',
+        body: JSON.stringify({ title }),
+      });
+    } catch {
+      // Last-resort fallback: keep title editable even if backend route is stale.
+      setLocalCustomTitle(id, title);
+      return { title: title.trim() || 'Untitled' };
+    }
+  });
 
 export const exportSession = (id: string, format: 'md' | 'json') =>
   `${BASE}/sessions/${id}/export?format=${format}`;

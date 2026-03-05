@@ -44,6 +44,12 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_tokens ON sessions(total_input_tokens);
   `);
 
+  const sessionCols = db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+  const hasCustomTitle = sessionCols.some(c => c.name === 'custom_title');
+  if (!hasCustomTitle) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN custom_title TEXT;`);
+  }
+
   // FTS5 table - create separately as it doesn't support IF NOT EXISTS well
   try {
     db.exec(`

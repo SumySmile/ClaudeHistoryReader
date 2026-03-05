@@ -58,9 +58,17 @@ export function ToolUseBlock({ name, input, id }: Props) {
 
   return (
     <div className="border border-[#d0ddd5] rounded-lg overflow-hidden bg-white shadow-sm">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-[#f0f5f2] transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded(prev => !prev);
+          }
+        }}
+        className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-[#f0f5f2] transition-colors cursor-pointer"
       >
         <Icon size={14} className={colorClass} />
         <span className={`font-medium ${colorClass}`}>{name}</span>
@@ -69,7 +77,7 @@ export function ToolUseBlock({ name, input, id }: Props) {
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
         {expanded ? <ChevronDown size={14} className="text-[#9aafa3]" /> : <ChevronRight size={14} className="text-[#9aafa3]" />}
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-[#d0ddd5] bg-[#f7faf8]">
@@ -83,6 +91,7 @@ export function ToolUseBlock({ name, input, id }: Props) {
 function ToolContent({ name, obj, fallback }: { name: string; obj: Record<string, any> | null; fallback: string }) {
   if (!obj) return <RawBlock text={fallback} />;
   switch (name) {
+    case 'ExitPlanMode': return <ExitPlanContent sendMessageToUser={obj.sendMessageToUser} plan={obj.plan} />;
     case 'Write': return <WriteContent filePath={obj.file_path} content={obj.content} />;
     case 'Edit': return <EditContent filePath={obj.file_path} oldStr={obj.old_string} newStr={obj.new_string} />;
     case 'Bash': return <BashContent command={obj.command} description={obj.description} />;
@@ -94,6 +103,36 @@ function ToolContent({ name, obj, fallback }: { name: string; obj: Record<string
     case 'WebFetch': return <SimpleField label="URL" value={obj.url} />;
     default: return <RawBlock text={fallback} />;
   }
+}
+
+function ExitPlanContent({ sendMessageToUser, plan }: { sendMessageToUser?: string; plan?: string }) {
+  const messageText = decodeEscapedText(sendMessageToUser || '');
+  const planText = decodeEscapedText(plan || '');
+
+  if (!messageText && !planText) {
+    return <RawBlock text="No plan content." />;
+  }
+
+  return (
+    <div className="p-3 space-y-3">
+      {messageText && (
+        <section className="bg-white border border-[#d0ddd5] rounded-lg p-3">
+          <div className="text-xs uppercase tracking-wide text-[#9aafa3] mb-2">Send Message</div>
+          <div className="markdown-content text-sm text-[#3d5248]">
+            <MarkdownRenderer content={messageText} />
+          </div>
+        </section>
+      )}
+      {planText && (
+        <section className="bg-white border border-[#d0ddd5] rounded-lg p-3">
+          <div className="text-xs uppercase tracking-wide text-[#9aafa3] mb-2">Plan</div>
+          <div className="markdown-content text-sm text-[#3d5248] max-h-[560px] overflow-y-auto">
+            <MarkdownRenderer content={planText} />
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
 
 function WriteContent({ filePath, content }: { filePath?: string; content?: string }) {
@@ -233,6 +272,7 @@ function getPreview(name: string, input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const obj = input as Record<string, any>;
   switch (name) {
+    case 'ExitPlanMode': return (decodeEscapedText(obj.sendMessageToUser || '').split('\n')[0] || '').slice(0, 80);
     case 'Read': return obj.file_path || '';
     case 'Write': return obj.file_path || '';
     case 'Edit': return obj.file_path || '';
@@ -244,4 +284,13 @@ function getPreview(name: string, input: unknown): string {
     case 'WebSearch': return obj.query || '';
     default: return '';
   }
+}
+
+function decodeEscapedText(value: string): string {
+  if (!value) return '';
+  return value
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\r/g, '\r');
 }

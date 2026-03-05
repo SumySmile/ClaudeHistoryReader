@@ -5,6 +5,8 @@ import { getDb } from './db/connection.js';
 import { scanAllProjects } from './services/scanner.js';
 import { buildIndex, getIndexingStatus } from './services/indexer.js';
 import { startWatcher, onFileChange } from './services/watcher.js';
+import { sanitizeConversationText } from './services/text-normalization.js';
+import { parseSession } from './services/parser.js';
 import sessionsRouter from './routes/sessions.js';
 import searchRouter from './routes/search.js';
 import tagsRouter from './routes/tags.js';
@@ -67,54 +69,74 @@ async function start() {
   const db = getDb();
   console.log('[startup] Database initialized');
 
-  // Clean up raw JSON in existing first_prompt values
-  const rawRows = db.prepare(
-    `SELECT id, first_prompt FROM sessions WHERE first_prompt LIKE '[%'`
+  // Normalize stored prompt/summary text to remove wrapper noise and recover escaped markdown newlines.
+  const promptRows = db.prepare(
+    `SELECT id, first_prompt FROM sessions WHERE first_prompt IS NOT NULL`
   ).all() as { id: string; first_prompt: string }[];
-  if (rawRows.length > 0) {
-    const update = db.prepare('UPDATE sessions SET first_prompt = ? WHERE id = ?');
-    for (const row of rawRows) {
-      try {
-        const arr = JSON.parse(row.first_prompt);
-        if (Array.isArray(arr)) {
-          const text = arr
-            .filter((b: any) => b.type === 'text' && b.text)
-            .map((b: any) => b.text)
-            .join(' ')
-            .trim();
-          update.run(text || null, row.id);
-        }
-      } catch {}
-    }
-    console.log(`[startup] Cleaned ${rawRows.length} first_prompt values`);
-  }
-
-  // Clean noisy first_prompt values (XML tags and bracket-wrapped noise)
-  const noisyPrompts = db.prepare(
-    `SELECT id, first_prompt FROM sessions WHERE first_prompt IS NOT NULL AND (first_prompt LIKE '[%]' OR first_prompt LIKE '%<%>%')`
-  ).all() as { id: string; first_prompt: string }[];
-  if (noisyPrompts.length > 0) {
+  if (promptRows.length > 0) {
     const updatePrompt = db.prepare('UPDATE sessions SET first_prompt = ? WHERE id = ?');
-    for (const row of noisyPrompts) {
-      const cleaned = row.first_prompt.replace(/<[^>]+>/g, '').trim();
-      const final = /^\[.*\]$/.test(cleaned) ? null : (cleaned || null);
-      updatePrompt.run(final, row.id);
+    let updated = 0;
+    for (const row of promptRows) {
+      const normalized = sanitizeConversationText(row.first_prompt);
+      if ((normalized ?? null) !== row.first_prompt) {
+        updatePrompt.run(normalized, row.id);
+        updated++;
+      }
     }
-    console.log(`[startup] Cleaned ${noisyPrompts.length} noisy first_prompt values`);
+    if (updated > 0) {
+      console.log(`[startup] Normalized ${updated} first_prompt values`);
+    }
   }
 
-  // Clean noisy summaries (interrupted sessions, XML tags)
-  const noisySummaries = db.prepare(
-    `SELECT id, summary FROM sessions WHERE summary IS NOT NULL AND (summary LIKE '[%]' OR summary LIKE '%<%>%')`
+  const summaryRows = db.prepare(
+    `SELECT id, summary FROM sessions WHERE summary IS NOT NULL`
   ).all() as { id: string; summary: string }[];
-  if (noisySummaries.length > 0) {
+  if (summaryRows.length > 0) {
     const updateSummary = db.prepare('UPDATE sessions SET summary = ? WHERE id = ?');
-    for (const row of noisySummaries) {
-      const cleaned = row.summary.replace(/<[^>]+>/g, '').trim();
-      const final = /^\[.*\]$/.test(cleaned) ? null : (cleaned || null);
-      updateSummary.run(final, row.id);
+    let updated = 0;
+    for (const row of summaryRows) {
+      const normalized = sanitizeConversationText(row.summary);
+      if ((normalized ?? null) !== row.summary) {
+        updateSummary.run(normalized, row.id);
+        updated++;
+      }
     }
-    console.log(`[startup] Cleaned ${noisySummaries.length} noisy summaries`);
+    if (updated > 0) {
+      console.log(`[startup] Normalized ${updated} summaries`);
+    }
+  }
+
+  // Backfill title from actual message content for sessions that still have no usable summary/prompt.
+  const titleMissingRows = db.prepare(
+    `SELECT id, file_path FROM sessions
+     WHERE COALESCE(TRIM(summary), '') = ''
+       AND COALESCE(TRIM(first_prompt), '') = ''
+       AND file_path IS NOT NULL`
+  ).all() as { id: string; file_path: string }[];
+  if (titleMissingRows.length > 0) {
+    const updatePrompt = db.prepare('UPDATE sessions SET first_prompt = ? WHERE id = ?');
+    let updated = 0;
+    const interruptedRe = /^\[\s*Request interrupted by user(?: for tool use)?\s*\]$/i;
+    for (const row of titleMissingRows) {
+      try {
+        const messages = await parseSession(row.file_path);
+        const candidate = messages
+          .filter(m => m.role === 'user')
+          .flatMap(m => m.content)
+          .filter(c => c.type === 'text' && typeof c.text === 'string')
+          .map(c => sanitizeConversationText(c.text || ''))
+          .find(t => t && !interruptedRe.test(t));
+        if (candidate) {
+          updatePrompt.run(candidate.slice(0, 500), row.id);
+          updated++;
+        }
+      } catch {
+        // ignore parse error during startup backfill
+      }
+    }
+    if (updated > 0) {
+      console.log(`[startup] Backfilled ${updated} missing titles from message content`);
+    }
   }
 
   // Scan all projects

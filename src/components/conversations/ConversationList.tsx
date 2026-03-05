@@ -4,9 +4,10 @@ import { ConversationCard } from './ConversationCard';
 interface Props {
   sessions: Session[];
   onToggleFavorite: (id: string) => void;
+  onSelectProject?: (projectSlug: string) => void;
 }
 
-export function ConversationList({ sessions, onToggleFavorite }: Props) {
+export function ConversationList({ sessions, onToggleFavorite, onSelectProject }: Props) {
   if (sessions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-[#9aafa3]">
@@ -23,6 +24,7 @@ export function ConversationList({ sessions, onToggleFavorite }: Props) {
           key={session.id}
           session={session}
           onToggleFavorite={onToggleFavorite}
+          onSelectProject={onSelectProject}
         />
       ))}
     </div>

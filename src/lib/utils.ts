@@ -36,3 +36,7 @@ export function cn(...classes: (string | false | null | undefined)[]): string {
 export function projectDisplayName(slug: string): string {
   return slug.replace(/--/g, '/').replace(/-/g, ' ');
 }
+
+export function sessionTitle(summary: string | null, firstPrompt: string | null, fallback = 'Untitled'): string {
+  return summary || truncate(firstPrompt, 80) || fallback;
+}

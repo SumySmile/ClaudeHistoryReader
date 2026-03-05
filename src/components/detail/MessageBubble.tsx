@@ -4,6 +4,7 @@ import { ToolUseBlock } from './ToolUseBlock';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { User, Bot } from 'lucide-react';
 import { formatDate } from '../../lib/utils';
+import { useState } from 'react';
 
 interface Props {
   message: Message;
@@ -47,7 +48,7 @@ export function MessageBubble({ message }: Props) {
 
         <div className="space-y-2">
           {message.content.map((block, i) => (
-            <ContentBlock key={i} block={block} />
+            <ContentBlock key={i} block={block} role={message.role} />
           ))}
         </div>
       </div>
@@ -55,14 +56,10 @@ export function MessageBubble({ message }: Props) {
   );
 }
 
-function ContentBlock({ block }: { block: MessageContent }) {
+function ContentBlock({ block, role }: { block: MessageContent; role: Message['role'] }) {
   switch (block.type) {
     case 'text':
-      return (
-        <div className="markdown-content text-[#3d5248]">
-          <MarkdownRenderer content={block.text || ''} />
-        </div>
-      );
+      return <CollapsibleMarkdownBlock text={block.text || ''} role={role} />;
     case 'thinking':
       return <ThinkingBlock thinking={block.thinking || ''} summary={block.summary} />;
     case 'tool_use':
@@ -87,4 +84,36 @@ function ContentBlock({ block }: { block: MessageContent }) {
     default:
       return null;
   }
+}
+
+function CollapsibleMarkdownBlock({ text, role }: { text: string; role: Message['role'] }) {
+  const [expanded, setExpanded] = useState(false);
+  const lineCount = text.split(/\r?\n/).length;
+  const isPlanLike = /implement the following plan|^#\s*plan[:：]|计划|方案/i.test(text);
+  const shouldCollapse = text.length > 1200 || lineCount > 24 || (role === 'user' && isPlanLike && text.length > 500);
+
+  if (!shouldCollapse) {
+    return (
+      <div className="markdown-content text-[#3d5248]">
+        <MarkdownRenderer content={text} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div
+        className="markdown-content text-[#3d5248] overflow-hidden"
+        style={expanded ? undefined : { display: '-webkit-box', WebkitLineClamp: 8, WebkitBoxOrient: 'vertical' as const }}
+      >
+        <MarkdownRenderer content={text} />
+      </div>
+      <button
+        onClick={() => setExpanded(prev => !prev)}
+        className="mt-1 text-xs text-[#6b8578] hover:text-[#2d3d34] underline underline-offset-2"
+      >
+        {expanded ? 'Collapse' : 'Expand'}
+      </button>
+    </div>
+  );
 }
