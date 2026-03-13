@@ -69,6 +69,17 @@ export interface PaginatedSessions {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
+export interface ToolUseResultData {
+  questions: {
+    question: string;
+    header?: string;
+    options: { label: string; description?: string }[];
+    multiSelect?: boolean;
+  }[];
+  answers: Record<string, string>;
+  annotations?: Record<string, { notes?: string }>;
+}
+
 export interface MessageContent {
   type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image' | 'error';
   text?: string;
@@ -80,6 +91,8 @@ export interface MessageContent {
   tool_use_id?: string;
   content?: string;
   is_error?: boolean;
+  tool_name?: string;
+  toolUseResult?: ToolUseResultData;
   source?: unknown;
   error?: string;
 }

@@ -1,8 +1,10 @@
-const INTERRUPTED_PLACEHOLDER_RE = /^\[\s*Request interrupted by user for tool use\s*\]$/i;
+const INTERRUPTED_PLACEHOLDER_RE = /^\[\s*Request interrupted by user(?:\s+for tool use)?\s*\]$/i;
 const COMMAND_WRAPPER_RE = /<\/?command-(?:message|name|args)>/i;
 const COMMAND_MESSAGE_BLOCK_RE = /<command-message>([\s\S]*?)<\/command-message>/i;
 const COMMAND_NAME_BLOCK_RE = /<command-name>([\s\S]*?)<\/command-name>/i;
 const COMMAND_ARGS_BLOCK_RE = /<command-args>([\s\S]*?)<\/command-args>/i;
+const LOCAL_COMMAND_RE = /<local-command-(?:caveat|stdout|stderr)>[\s\S]*?<\/local-command-(?:caveat|stdout|stderr)>/gi;
+const SYSTEM_REMINDER_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/gi;
 
 function decodeEscapedWhitespace(input: string): string {
   return input
@@ -80,14 +82,21 @@ export function isInterruptedPlaceholder(input: string): boolean {
 export function normalizeMessageText(raw: string | null | undefined): string {
   if (!raw) return '';
   let text = decodeEscapedWhitespace(raw).trim();
+
+  // Strip system-reminder tags (injected into tool results)
+  text = text.replace(SYSTEM_REMINDER_RE, '').trim();
+
+  // Strip local-command tags (system noise from local command execution)
+  text = text.replace(LOCAL_COMMAND_RE, '').trim();
+
   if (COMMAND_WRAPPER_RE.test(text)) {
     const invocation = extractCommandInvocation(text);
     if (invocation) {
-      return isInterruptedPlaceholder(invocation) ? '' : invocation;
+      // Keep interrupted placeholders - they're meaningful context
+      return invocation;
     }
     text = unwrapCommandWrappers(text).trim();
   }
-  if (isInterruptedPlaceholder(text)) return '';
   return text;
 }
 
@@ -96,6 +105,8 @@ export function sanitizeConversationText(raw: string | null | undefined): string
   const extracted = extractTextFromJsonArray(raw) ?? raw;
   const normalized = normalizeMessageText(extracted);
   if (!normalized) return null;
+  // For titles, filter out interrupted placeholders (not useful as a title)
+  if (isInterruptedPlaceholder(normalized)) return null;
   const singleLine = normalized.replace(/\s+/g, ' ').trim();
   return singleLine || null;
 }

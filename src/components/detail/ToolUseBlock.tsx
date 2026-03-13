@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wrench, ChevronDown, ChevronRight, Copy, Check, FileText, Terminal, Search, FolderSearch, Globe, Pencil } from 'lucide-react';
+import { Wrench, ChevronDown, ChevronRight, Copy, Check, FileText, Terminal, Search, FolderSearch, Globe, Pencil, HelpCircle } from 'lucide-react';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Read: FileText, Write: FileText, Edit: Pencil, Bash: Terminal,
   Glob: FolderSearch, Grep: Search, WebFetch: Globe, WebSearch: Globe,
+  AskUserQuestion: HelpCircle,
 };
 
 const TOOL_COLORS: Record<string, string> = {
@@ -23,6 +24,7 @@ const TOOL_COLORS: Record<string, string> = {
   Task: 'text-[#c878a0]',
   WebFetch: 'text-[#6878c0]',
   WebSearch: 'text-[#48a890]',
+  AskUserQuestion: 'text-[#b07840]',
 };
 
 function getLang(filePath: string): string {
@@ -101,6 +103,7 @@ function ToolContent({ name, obj, fallback }: { name: string; obj: Record<string
     case 'Task': return <TaskContent description={obj.description} prompt={obj.prompt} />;
     case 'WebSearch': return <SimpleField label="Query" value={obj.query} />;
     case 'WebFetch': return <SimpleField label="URL" value={obj.url} />;
+    case 'AskUserQuestion': return <AskUserQuestionContent input={obj} />;
     default: return <RawBlock text={fallback} />;
   }
 }
@@ -282,8 +285,43 @@ function getPreview(name: string, input: unknown): string {
     case 'Task': return obj.description || '';
     case 'WebFetch': return obj.url || '';
     case 'WebSearch': return obj.query || '';
+    case 'AskUserQuestion': {
+      const qs = obj.questions as any[] | undefined;
+      if (qs?.length) return qs[0]?.question?.slice(0, 80) || '';
+      return '';
+    }
     default: return '';
   }
+}
+
+function AskUserQuestionContent({ input }: { input: Record<string, any> }) {
+  const questions = input.questions as any[] | undefined;
+  if (!questions?.length) return <RawBlock text={JSON.stringify(input, null, 2)} />;
+
+  return (
+    <div className="p-3 space-y-3">
+      {questions.map((q: any, qi: number) => (
+        <div key={qi} className="space-y-2">
+          <div className="text-sm font-medium text-[#2d3d34]">{q.question}</div>
+          {q.options?.length > 0 && (
+            <div className="space-y-1">
+              {q.options.map((opt: any, oi: number) => (
+                <div key={oi} className="flex items-start gap-2 text-sm">
+                  <span className="text-[#b07840] font-mono text-xs mt-0.5">{oi + 1}.</span>
+                  <div>
+                    <span className="text-[#3d5248]">{opt.label}</span>
+                    {opt.description && (
+                      <span className="text-[#9aafa3] ml-1.5 text-xs">— {opt.description}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function decodeEscapedText(value: string): string {

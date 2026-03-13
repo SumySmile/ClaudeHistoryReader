@@ -42,11 +42,22 @@ export interface ParsedMessage {
   duration_ms: number | null;
 }
 
+export interface ToolUseResultData {
+  questions: {
+    question: string;
+    header?: string;
+    options: { label: string; description?: string }[];
+    multiSelect?: boolean;
+  }[];
+  answers: Record<string, string>;
+  annotations?: Record<string, { notes?: string }>;
+}
+
 export type MessageContent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string; summary?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
+  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean; tool_name?: string; toolUseResult?: ToolUseResultData }
   | { type: 'image'; source: unknown }
   | { type: 'error'; error: string };
 

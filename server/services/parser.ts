@@ -13,6 +13,8 @@ export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
 
   // Track assistant message chunks by API message id
   const assistantChunks = new Map<string, ParsedMessage>();
+  // Track tool_use_id -> tool_name for tagging tool_results (e.g. AskUserQuestion answers)
+  const toolUseNames = new Map<string, string>();
 
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -23,7 +25,7 @@ export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
       if (['file-history-snapshot', 'progress', 'summary'].includes(obj.type)) continue;
 
       if (obj.type === 'user') {
-        const msg = parseUserMessage(obj);
+        const msg = parseUserMessage(obj, toolUseNames);
         if (msg) messages.push(msg);
       } else if (obj.type === 'assistant') {
         const apiId = obj.message?.id;
@@ -32,6 +34,12 @@ export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
           const existing = assistantChunks.get(apiId)!;
           const newContent = extractAssistantContent(obj.message?.content || []);
           existing.content.push(...newContent);
+          // Track tool_use names from merged chunks
+          for (const block of newContent) {
+            if (block.type === 'tool_use' && block.id) {
+              toolUseNames.set(block.id, block.name);
+            }
+          }
           // Update token counts (take the latest/largest)
           if (obj.message?.usage) {
             existing.input_tokens = Math.max(existing.input_tokens, obj.message.usage.input_tokens || 0);
@@ -42,6 +50,12 @@ export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
           if (msg) {
             messages.push(msg);
             if (apiId) assistantChunks.set(apiId, msg);
+            // Track tool_use names for tagging user tool_results
+            for (const block of msg.content) {
+              if (block.type === 'tool_use' && block.id) {
+                toolUseNames.set(block.id, block.name);
+              }
+            }
           }
         }
       } else if (obj.type === 'result') {
@@ -55,7 +69,7 @@ export async function parseSession(filePath: string): Promise<ParsedMessage[]> {
   return messages;
 }
 
-function parseUserMessage(obj: any): ParsedMessage | null {
+function parseUserMessage(obj: any, toolUseNames?: Map<string, string>): ParsedMessage | null {
   const content = obj.message?.content;
   if (!content) return null;
 
@@ -74,12 +88,19 @@ function parseUserMessage(obj: any): ParsedMessage | null {
             : JSON.stringify(block.content);
         const normalized = normalizeMessageText(text);
         if (!normalized) continue;
-        messageContent.push({
+        const toolName = toolUseNames?.get(block.tool_use_id);
+        const resultBlock: MessageContent = {
           type: 'tool_result',
           tool_use_id: block.tool_use_id,
           content: normalized.slice(0, 10000), // Truncate very long results
           is_error: block.is_error,
-        });
+          ...(toolName ? { tool_name: toolName } : {}),
+        };
+        // Attach structured answer data for AskUserQuestion
+        if (toolName === 'AskUserQuestion' && obj.toolUseResult) {
+          (resultBlock as any).toolUseResult = obj.toolUseResult;
+        }
+        messageContent.push(resultBlock);
       } else if (block.type === 'text') {
         const normalized = normalizeMessageText(block.text);
         if (normalized) messageContent.push({ type: 'text', text: normalized });
