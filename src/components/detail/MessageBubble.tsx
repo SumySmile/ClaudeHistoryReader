@@ -1,4 +1,4 @@
-import { Message, MessageContent, ToolUseResultData } from '../../lib/api';
+import { Message, MessageContent, ToolUseAnswerValue, ToolUseQuestion, ToolUseResultData } from '../../lib/api';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolUseBlock } from './ToolUseBlock';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
@@ -8,6 +8,7 @@ import { useState } from 'react';
 
 // Tool names whose results should be shown as user answers
 const VISIBLE_TOOL_RESULTS = new Set(['AskUserQuestion']);
+type ToolResultBlock = MessageContent & { type: 'tool_result' };
 
 interface Props {
   message: Message;
@@ -17,12 +18,12 @@ export function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
 
   // Hide tool-result-only messages UNLESS they contain answers to visible tools
-  const isToolResult = message.content.every(c => c.type === 'tool_result');
+  const isToolResultOnly = message.content.every(c => c.type === 'tool_result');
   const hasVisibleAnswer = message.content.some(
-    c => c.type === 'tool_result' && c.tool_name && VISIBLE_TOOL_RESULTS.has(c.tool_name)
+    c => isToolResultBlock(c) && isVisibleToolResult(c)
   );
 
-  if (isToolResult && !hasVisibleAnswer) return null;
+  if (isToolResultOnly && !hasVisibleAnswer) return null;
 
   return (
     <div className="flex gap-3 px-4">
@@ -91,7 +92,7 @@ function ContentBlock({ block, role }: { block: MessageContent; role: Message['r
     case 'tool_use':
       return <ToolUseBlock name={block.name || ''} input={block.input} id={block.id || ''} />;
     case 'tool_result':
-      if (block.tool_name && VISIBLE_TOOL_RESULTS.has(block.tool_name)) {
+      if (isVisibleToolResult(block)) {
         return <UserAnswerBlock content={block.content || ''} toolUseResult={block.toolUseResult} />;
       }
       return (
@@ -116,8 +117,9 @@ function ContentBlock({ block, role }: { block: MessageContent; role: Message['r
 }
 
 function UserAnswerBlock({ content, toolUseResult }: { content: string; toolUseResult?: ToolUseResultData }) {
-  // Structured display when toolUseResult is available
-  if (toolUseResult?.questions?.length && toolUseResult.answers) {
+  const items = toolUseResult ? buildAnswerItems(toolUseResult) : [];
+
+  if (items.length > 0) {
     return (
       <div className="rounded-lg border border-[#d0c8a0] bg-[#fdfbf3] p-3">
         <div className="flex items-center gap-1.5 mb-3">
@@ -125,81 +127,69 @@ function UserAnswerBlock({ content, toolUseResult }: { content: string; toolUseR
           <span className="text-xs font-medium text-[#b07840]">User answered Claude's questions</span>
         </div>
         <div className="space-y-4">
-          {toolUseResult.questions.map((q, qi) => {
-            const answerKeys = Object.keys(toolUseResult.answers);
-            const answerKey = answerKeys.find(k => k === q.question)
-              || answerKeys.find(k => q.question.startsWith(k) || k.startsWith(q.question.slice(0, 50)))
-              || answerKeys[qi];
-            const answerValue = answerKey ? toolUseResult.answers[answerKey] : undefined;
-            const notes = answerKey ? toolUseResult.annotations?.[answerKey]?.notes : undefined;
-
-            // Check if the answer matches a predefined option
-            const selectedOptionIndex = q.options?.findIndex(opt => opt.label === answerValue);
-            const isOther = answerValue !== undefined && selectedOptionIndex === -1;
-
-            return (
-              <div key={qi} className="space-y-2">
-                {/* Question */}
-                <div className="text-sm font-medium text-[#2d3d34]">
-                  {q.header && <span className="text-xs text-[#9aafa3] mr-1.5">[{q.header}]</span>}
-                  {q.question.length > 120 ? q.question.slice(0, 120) + '...' : q.question}
-                </div>
-
-                {/* Options list */}
-                {q.options?.length > 0 && (
-                  <div className="space-y-1 ml-1">
-                    {q.options.map((opt, oi) => {
-                      const isSelected = oi === selectedOptionIndex;
-                      return (
-                        <div
-                          key={oi}
-                          className={`flex items-start gap-2 text-sm rounded px-2 py-1 ${
-                            isSelected ? 'bg-[#edf7f0] border border-[#4da87a]' : ''
-                          }`}
-                        >
-                          {isSelected ? (
-                            <Check size={14} className="text-[#4da87a] mt-0.5 shrink-0" />
-                          ) : (
-                            <span className="text-[#9aafa3] font-mono text-xs mt-0.5 w-3.5 shrink-0">{oi + 1}.</span>
-                          )}
-                          <div>
-                            <span className={isSelected ? 'text-[#2d6b46] font-medium' : 'text-[#6b8578]'}>{opt.label}</span>
-                            {opt.description && (
-                              <span className="text-[#9aafa3] ml-1.5 text-xs"> — {opt.description}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {/* "Other" indicator when user typed custom answer */}
-                    {isOther && (
-                      <div className="flex items-start gap-2 text-sm rounded px-2 py-1 bg-[#fdf6e8] border border-[#d0c8a0]">
-                        <Pencil size={14} className="text-[#b07840] mt-0.5 shrink-0" />
-                        <span className="text-[#b07840] font-medium">Other (custom answer)</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* User's custom text or notes */}
-                {(isOther && answerValue) && (
-                  <div className="ml-1 border-t border-[#e8e0c8] pt-2 mt-2">
-                    <div className="markdown-content text-sm text-[#3d5248]">
-                      <MarkdownRenderer content={answerValue} />
-                    </div>
-                  </div>
-                )}
-                {notes && notes !== answerValue && (
-                  <div className="ml-1 border-t border-[#e8e0c8] pt-2 mt-2">
-                    <div className="text-xs text-[#9aafa3] mb-1">Notes:</div>
-                    <div className="markdown-content text-sm text-[#3d5248]">
-                      <MarkdownRenderer content={notes} />
-                    </div>
-                  </div>
-                )}
+          {items.map((item, index) => (
+            <div key={index} className="space-y-2">
+              <div className="text-sm font-medium text-[#2d3d34]">
+                {item.question.header && <span className="text-xs text-[#9aafa3] mr-1.5">[{item.question.header}]</span>}
+                {item.question.question}
               </div>
-            );
-          })}
+
+              {item.question.options.length > 0 && (
+                <div className="space-y-1 ml-1">
+                  {item.question.options.map((option, optionIndex) => {
+                    const isSelected = item.selectedOptionLabels.has(normalizeLookupKey(option.label));
+                    return (
+                      <div
+                        key={optionIndex}
+                        className={`flex items-start gap-2 text-sm rounded px-2 py-1 border ${
+                          isSelected
+                            ? 'bg-[#edf7f0] border-[#4da87a]'
+                            : 'bg-white border-transparent'
+                        }`}
+                      >
+                        {isSelected ? (
+                          <Check size={14} className="text-[#4da87a] mt-0.5 shrink-0" />
+                        ) : (
+                          <span className="text-[#9aafa3] font-mono text-xs mt-0.5 w-3.5 shrink-0">{optionIndex + 1}.</span>
+                        )}
+                        <div>
+                          <span className={isSelected ? 'text-[#2d6b46] font-medium' : 'text-[#6b8578]'}>{option.label}</span>
+                          {option.description && (
+                            <span className="text-[#9aafa3] ml-1.5 text-xs"> — {option.description}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {item.customAnswers.length > 0 && (
+                <div className="space-y-2 ml-1">
+                  {item.customAnswers.map((answer, answerIndex) => (
+                    <div key={answerIndex} className="rounded border border-[#d0c8a0] bg-[#fdf6e8] p-2">
+                      <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-[#b07840]">
+                        <Pencil size={13} />
+                        Custom answer
+                      </div>
+                      <div className="markdown-content text-sm text-[#3d5248]">
+                        <MarkdownRenderer content={answer} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {item.notes && (!item.customAnswers.length || item.notes !== item.customAnswers[0]) && (
+                <div className="ml-1 border-t border-[#e8e0c8] pt-2 mt-2">
+                  <div className="text-xs text-[#9aafa3] mb-1">Notes:</div>
+                  <div className="markdown-content text-sm text-[#3d5248]">
+                    <MarkdownRenderer content={item.notes} />
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -217,6 +207,112 @@ function UserAnswerBlock({ content, toolUseResult }: { content: string; toolUseR
       </div>
     </div>
   );
+}
+
+function buildAnswerItems(toolUseResult: ToolUseResultData) {
+  const questions = toolUseResult.questions || [];
+  const remainingAnswers = new Map(Object.entries(toolUseResult.answers || {}));
+
+  const items = questions.map((question, index) => {
+    const matchKey = findMatchingAnswerKey(question, remainingAnswers, index);
+    const rawAnswer = matchKey ? remainingAnswers.get(matchKey) : undefined;
+    if (matchKey) remainingAnswers.delete(matchKey);
+
+    const selectedOptionLabels = new Set<string>();
+    const customAnswers: string[] = [];
+
+    for (const answer of toAnswerList(rawAnswer)) {
+      const matchedOption = findMatchingOptionLabel(question.options || [], answer);
+      if (matchedOption) {
+        selectedOptionLabels.add(normalizeLookupKey(matchedOption));
+      } else if (answer.trim()) {
+        customAnswers.push(answer);
+      }
+    }
+
+    const notes = findMatchingNotes(question, toolUseResult);
+
+    return {
+      question,
+      selectedOptionLabels,
+      customAnswers,
+      notes,
+    };
+  });
+
+  for (const [key, value] of remainingAnswers.entries()) {
+    items.push({
+      question: { question: key, options: [], multiSelect: Array.isArray(value) },
+      selectedOptionLabels: new Set<string>(),
+      customAnswers: toAnswerList(value),
+      notes: toolUseResult.annotations?.[key]?.notes,
+    });
+  }
+
+  return items.filter(item => item.selectedOptionLabels.size > 0 || item.customAnswers.length > 0 || item.notes);
+}
+
+function findMatchingAnswerKey(question: ToolUseQuestion, answers: Map<string, ToolUseAnswerValue>, index: number): string | undefined {
+  if (answers.has(question.question)) return question.question;
+
+  const normalizedQuestion = normalizeLookupKey(question.question);
+  for (const key of answers.keys()) {
+    const normalizedKey = normalizeLookupKey(key);
+    if (!normalizedKey) continue;
+    if (normalizedKey === normalizedQuestion || normalizedKey.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedKey)) {
+      return key;
+    }
+  }
+
+  return index < answers.size ? Array.from(answers.keys())[index] : undefined;
+}
+
+function findMatchingNotes(question: ToolUseQuestion, toolUseResult: ToolUseResultData): string | undefined {
+  if (toolUseResult.annotations?.[question.question]?.notes) {
+    return toolUseResult.annotations[question.question]?.notes;
+  }
+
+  const normalizedQuestion = normalizeLookupKey(question.question);
+  for (const [key, value] of Object.entries(toolUseResult.annotations || {})) {
+    const normalizedKey = normalizeLookupKey(key);
+    if (!normalizedKey) continue;
+    if (normalizedKey === normalizedQuestion || normalizedKey.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedKey)) {
+      return value.notes;
+    }
+  }
+
+  return undefined;
+}
+
+function findMatchingOptionLabel(options: ToolUseQuestion['options'], answer: string): string | undefined {
+  const normalizedAnswer = normalizeLookupKey(answer);
+  if (!normalizedAnswer) return undefined;
+
+  for (const option of options) {
+    const normalizedLabel = normalizeLookupKey(option.label);
+    if (normalizedLabel === normalizedAnswer) return option.label;
+  }
+
+  return undefined;
+}
+
+function toAnswerList(value: ToolUseAnswerValue | undefined): string[] {
+  if (typeof value === 'string') return value.trim() ? [value] : [];
+  if (Array.isArray(value)) return value.filter(answer => answer.trim());
+  return [];
+}
+
+function isToolResultBlock(block: MessageContent): block is ToolResultBlock {
+  return block.type === 'tool_result';
+}
+
+function isVisibleToolResult(block: ToolResultBlock) {
+  if (block.tool_name && VISIBLE_TOOL_RESULTS.has(block.tool_name)) return true;
+  return Boolean(block.toolUseResult?.questions?.length || block.toolUseResult?.answers && Object.keys(block.toolUseResult.answers).length > 0);
+}
+
+function normalizeLookupKey(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function CollapsibleMarkdownBlock({ text, role }: { text: string; role: Message['role'] }) {

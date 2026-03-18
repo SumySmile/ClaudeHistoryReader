@@ -7,6 +7,7 @@ import { buildIndex, getIndexingStatus } from './services/indexer.js';
 import { startWatcher, onFileChange } from './services/watcher.js';
 import { sanitizeConversationText } from './services/text-normalization.js';
 import { parseSession } from './services/parser.js';
+import type { MessageContent } from './types.js';
 import sessionsRouter from './routes/sessions.js';
 import searchRouter from './routes/search.js';
 import tagsRouter from './routes/tags.js';
@@ -30,7 +31,7 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => sseClients.delete(res));
 });
 
-function broadcastEvent(event: string, data?: any) {
+function broadcastEvent(event: string, data?: unknown) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data || {})}\n\n`;
   for (const client of sseClients) {
     client.write(msg);
@@ -63,13 +64,17 @@ onFileChange((type, sessionId) => {
   broadcastEvent('update', { type, sessionId });
 });
 
-// Startup
-async function start() {
-  // Initialize DB
-  const db = getDb();
-  console.log('[startup] Database initialized');
+async function runStartupPhase(name: string, task: () => Promise<void> | void) {
+  try {
+    await task();
+  } catch (error) {
+    console.error(`[startup] ${name} failed:`, error);
+  }
+}
 
-  // Normalize stored prompt/summary text to remove wrapper noise and recover escaped markdown newlines.
+function normalizeStoredText() {
+  const db = getDb();
+
   const promptRows = db.prepare(
     `SELECT id, first_prompt FROM sessions WHERE first_prompt IS NOT NULL`
   ).all() as { id: string; first_prompt: string }[];
@@ -105,55 +110,98 @@ async function start() {
       console.log(`[startup] Normalized ${updated} summaries`);
     }
   }
+}
 
-  // Backfill title from actual message content for sessions that still have no usable summary/prompt.
+function isTextContent(content: MessageContent): content is Extract<MessageContent, { type: 'text' }> {
+  return content.type === 'text';
+}
+
+async function backfillMissingTitles() {
+  const db = getDb();
   const titleMissingRows = db.prepare(
     `SELECT id, file_path FROM sessions
      WHERE COALESCE(TRIM(summary), '') = ''
        AND COALESCE(TRIM(first_prompt), '') = ''
        AND file_path IS NOT NULL`
   ).all() as { id: string; file_path: string }[];
-  if (titleMissingRows.length > 0) {
-    const updatePrompt = db.prepare('UPDATE sessions SET first_prompt = ? WHERE id = ?');
-    let updated = 0;
-    const interruptedRe = /^\[\s*Request interrupted by user(?: for tool use)?\s*\]$/i;
-    for (const row of titleMissingRows) {
-      try {
-        const messages = await parseSession(row.file_path);
-        const candidate = messages
-          .filter(m => m.role === 'user')
-          .flatMap(m => m.content)
-          .filter(c => c.type === 'text' && typeof c.text === 'string')
-          .map(c => sanitizeConversationText(c.text || ''))
-          .find(t => t && !interruptedRe.test(t));
-        if (candidate) {
-          updatePrompt.run(candidate.slice(0, 500), row.id);
-          updated++;
-        }
-      } catch {
-        // ignore parse error during startup backfill
+
+  if (titleMissingRows.length === 0) return;
+
+  const updatePrompt = db.prepare('UPDATE sessions SET first_prompt = ? WHERE id = ?');
+  let updated = 0;
+  const interruptedRe = /^\[\s*Request interrupted by user(?: for tool use)?\s*\]$/i;
+
+  for (const row of titleMissingRows) {
+    try {
+      const messages = await parseSession(row.file_path);
+      const candidate = messages
+        .filter(message => message.role === 'user')
+        .flatMap(message => message.content)
+        .filter(isTextContent)
+        .map(content => sanitizeConversationText(content.text || ''))
+        .find(text => text && !interruptedRe.test(text));
+
+      if (candidate) {
+        updatePrompt.run(candidate.slice(0, 500), row.id);
+        updated++;
       }
-    }
-    if (updated > 0) {
-      console.log(`[startup] Backfilled ${updated} missing titles from message content`);
+    } catch (error) {
+      console.error(`[startup] Title backfill skipped for ${row.file_path}:`, error);
     }
   }
 
-  // Scan all projects
-  const count = await scanAllProjects();
-  console.log(`[startup] Scanned ${count} sessions`);
+  if (updated > 0) {
+    console.log(`[startup] Backfilled ${updated} missing titles from message content`);
+  }
+}
 
-  // Start file watcher
-  startWatcher();
+async function runBackgroundStartup() {
+  await runStartupPhase('Text normalization', () => {
+    normalizeStoredText();
+  });
 
-  // Start background indexing
+  await runStartupPhase('Title backfill', async () => {
+    await backfillMissingTitles();
+  });
+
+  await runStartupPhase('Project scan', async () => {
+    const count = await scanAllProjects();
+    console.log(`[startup] Scanned ${count} sessions`);
+  });
+
+  await runStartupPhase('Watcher startup', () => {
+    startWatcher();
+    console.log('[startup] File watcher started');
+  });
+
   setTimeout(() => {
-    buildIndex().catch(e => console.error('[startup] Indexing error:', e));
+    void runStartupPhase('Background indexing', async () => {
+      await buildIndex();
+    });
   }, 1000);
+}
 
-  app.listen(PORT, () => {
-    console.log(`[startup] Server running at http://localhost:${PORT}`);
+async function listen() {
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(PORT, () => {
+      console.log(`[startup] Server running at http://localhost:${PORT}`);
+      resolve();
+    });
+
+    server.on('error', reject);
   });
 }
 
-start().catch(console.error);
+// Startup
+async function start() {
+  getDb();
+  console.log('[startup] Database initialized');
+
+  await listen();
+  void runBackgroundStartup();
+}
+
+start().catch(error => {
+  console.error('[startup] Fatal startup error:', error);
+  process.exitCode = 1;
+});

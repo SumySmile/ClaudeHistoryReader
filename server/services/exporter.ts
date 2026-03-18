@@ -1,5 +1,5 @@
 import { parseSession } from './parser.js';
-import type { ParsedMessage, MessageContent } from '../types.js';
+import type { ParsedMessage, MessageContent, ToolResultContent, ToolUseAnswerValue, ToolUseResultData } from '../types.js';
 import { getDb } from '../db/connection.js';
 
 export async function exportSession(sessionId: string, format: 'md' | 'json'): Promise<string> {
@@ -36,12 +36,16 @@ function exportAsMarkdown(session: any, messages: ParsedMessage[]): string {
         if (block.type === 'text') {
           lines.push(block.text);
         } else if (block.type === 'tool_result') {
-          lines.push(`<details><summary>Tool Result (${block.tool_use_id})</summary>`);
-          lines.push('');
-          lines.push('```');
-          lines.push(block.content.slice(0, 5000));
-          lines.push('```');
-          lines.push('</details>');
+          if (block.tool_name === 'AskUserQuestion') {
+            lines.push(...formatAskUserQuestionResult(block));
+          } else {
+            lines.push(`<details><summary>Tool Result (${block.tool_use_id})</summary>`);
+            lines.push('');
+            lines.push('```');
+            lines.push(block.content.slice(0, 5000));
+            lines.push('```');
+            lines.push('</details>');
+          }
         }
         lines.push('');
       }
@@ -71,4 +75,77 @@ function exportAsMarkdown(session: any, messages: ParsedMessage[]): string {
   }
 
   return lines.join('\n');
+}
+
+function formatAskUserQuestionResult(block: ToolResultContent): string[] {
+  const lines: string[] = [];
+  lines.push('**User answered Claude\'s questions**');
+  lines.push('');
+
+  const structured = block.toolUseResult;
+  if (structured?.questions?.length && structured.answers) {
+    for (const question of structured.questions) {
+      const answer = findAnswerValue(question.question, structured);
+      const notes = findNotes(question.question, structured);
+      if (!answer && !notes) continue;
+
+      lines.push(`- **${question.question}**`);
+      for (const item of toAnswerList(answer)) {
+        lines.push(`  - ${item}`);
+      }
+      if (notes) {
+        lines.push(`  - Notes: ${notes}`);
+      }
+      lines.push('');
+    }
+
+    if (lines.length > 2) return lines;
+  }
+
+  if (block.content) {
+    lines.push(block.content.slice(0, 5000));
+    lines.push('');
+  }
+
+  return lines;
+}
+
+function findAnswerValue(questionText: string, data: ToolUseResultData): ToolUseAnswerValue | undefined {
+  if (questionText in data.answers) return data.answers[questionText];
+  const normalizedQuestion = normalizeLookupKey(questionText);
+
+  for (const [key, value] of Object.entries(data.answers)) {
+    const normalizedKey = normalizeLookupKey(key);
+    if (!normalizedKey) continue;
+    if (normalizedKey === normalizedQuestion || normalizedKey.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedKey)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function findNotes(questionText: string, data: ToolUseResultData): string | undefined {
+  if (data.annotations?.[questionText]?.notes) return data.annotations[questionText]?.notes;
+  const normalizedQuestion = normalizeLookupKey(questionText);
+
+  for (const [key, value] of Object.entries(data.annotations || {})) {
+    const normalizedKey = normalizeLookupKey(key);
+    if (!normalizedKey) continue;
+    if (normalizedKey === normalizedQuestion || normalizedKey.includes(normalizedQuestion) || normalizedQuestion.includes(normalizedKey)) {
+      return value.notes;
+    }
+  }
+
+  return undefined;
+}
+
+function toAnswerList(value: ToolUseAnswerValue | undefined): string[] {
+  if (typeof value === 'string') return value ? [value] : [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return [];
+}
+
+function normalizeLookupKey(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
 }

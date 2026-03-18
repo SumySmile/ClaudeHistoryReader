@@ -42,22 +42,44 @@ export interface ParsedMessage {
   duration_ms: number | null;
 }
 
-export interface ToolUseResultData {
-  questions: {
-    question: string;
-    header?: string;
-    options: { label: string; description?: string }[];
-    multiSelect?: boolean;
-  }[];
-  answers: Record<string, string>;
-  annotations?: Record<string, { notes?: string }>;
+export interface ToolUseQuestionOption {
+  label: string;
+  description?: string;
 }
+
+export interface ToolUseQuestion {
+  question: string;
+  header?: string;
+  options: ToolUseQuestionOption[];
+  multiSelect?: boolean;
+}
+
+export type ToolUseAnswerValue = string | string[];
+
+export interface ToolUseAnnotation {
+  notes?: string;
+}
+
+export interface ToolUseResultData {
+  questions: ToolUseQuestion[];
+  answers: Record<string, ToolUseAnswerValue>;
+  annotations?: Record<string, ToolUseAnnotation>;
+}
+
+export type ToolResultContent = {
+  type: 'tool_result';
+  tool_use_id: string;
+  content: string;
+  is_error?: boolean;
+  tool_name?: string;
+  toolUseResult?: ToolUseResultData;
+};
 
 export type MessageContent =
   | { type: 'text'; text: string }
   | { type: 'thinking'; thinking: string; summary?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean; tool_name?: string; toolUseResult?: ToolUseResultData }
+  | ToolResultContent
   | { type: 'image'; source: unknown }
   | { type: 'error'; error: string };
 
